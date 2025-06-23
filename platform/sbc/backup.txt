@@ -1,0 +1,626 @@
+
+#include "display_server_sdl.h"
+
+#include "core/os/os.h"
+
+#ifdef GLES3_ENABLED
+#include "drivers/gles3/rasterizer_gles3.h"
+#include "sbc_gles3_loader.h"
+#include "thirdparty/glad/glad/gl.h"
+#endif
+
+DisplayServerSDL::DisplayServerSDL(const String &p_rendering_driver, WindowMode p_mode, VSyncMode p_vsync, uint32_t p_flags, const Point2i *p_position, const Size2i &p_resolution, int p_screen, Context p_context, int64_t p_parent_window, Error &r_error) {
+	print_line("DisplayServerSDL: Initializing with rendering driver: " + p_rendering_driver);
+	if (window) {
+		SDL_DestroyWindow(window);
+	}
+
+	if (SDL_Init(SDL_INIT_VIDEO)) {
+		print_line("DisplayServerSDL: Error initializing SDL: " + String(SDL_GetError()));
+		ERR_PRINT("Error initializing SDL: " + String(SDL_GetError()));
+		return;
+	}
+
+	// if (SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1")) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_HINT_OPENGL_ES_DRIVER: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_HINT_OPENGL_ES_DRIVER: " + String(SDL_GetError()));
+	// }
+
+	// if (SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2")) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_HINT_RENDER_DRIVER: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_HINT_RENDER_DRIVER: " + String(SDL_GetError()));
+	// }
+	// if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_EGL, 1)) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_GL_CONTEXT_EGL: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_GL_CONTEXT_EGL: " + String(SDL_GetError()));
+	// }
+	//#if defined(GLES3_ENABLED)
+	// if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_GL_CONTEXT_FLAGS: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_GL_CONTEXT_FLAGS: " + String(SDL_GetError()));
+	// }
+
+	// if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES)) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_GL_CONTEXT_PROFILE_MASK: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_GL_CONTEXT_PROFILE_MASK: " + String(SDL_GetError()));
+	// }
+	// if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE)) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_GL_CONTEXT_PROFILE_MASK: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_GL_CONTEXT_PROFILE_MASK: " + String(SDL_GetError()));
+	// }
+	// if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_GL_CONTEXT_MAJOR_VERSION: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_GL_CONTEXT_MAJOR_VERSION: " + String(SDL_GetError()));
+	// }
+	// if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0)) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_GL_CONTEXT_MINOR_VERSION: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_GL_CONTEXT_MINOR_VERSION: " + String(SDL_GetError()));
+	// }
+	// if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_RELEASE_BEHAVIOR, SDL_GL_CONTEXT_RELEASE_BEHAVIOR_NONE)) {
+	// 	print_line("DisplayServerSDL: Error setting SDL_GL_CONTEXT_RELEASE_BEHAVIOR: " + String(SDL_GetError()));
+	// 	ERR_PRINT("Error setting SDL_GL_CONTEXT_RELEASE_BEHAVIOR: " + String(SDL_GetError()));
+	// }
+
+	print_line("DisplayServerSDL: Creating SDL window with size: " + itos(p_resolution.width) + "x" + itos(p_resolution.height));
+
+	rendering_driver = p_rendering_driver;
+	window = SDL_CreateWindow(
+			"Godot",
+			SDL_WINDOWPOS_UNDEFINED,
+			SDL_WINDOWPOS_UNDEFINED,
+			p_resolution.width,
+			p_resolution.height,
+			SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+
+	window_size = p_resolution;
+	print_line("DisplayServerSDL: Window created with size: " + itos(window_size.width) + "x" + itos(window_size.height));
+
+	if (!window) {
+		print_line("DisplayServerSDL: Failed to create SDL window: " + String(SDL_GetError()));
+		ERR_FAIL_MSG("Failed to create SDL window: " + String(SDL_GetError()));
+	}
+
+	int major, minor;
+	SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &major);
+	SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &minor);
+	print_line(vformat("GLES context version: %d.%d", major, minor));
+
+#ifdef GLES3_ENABLED
+
+	if (gl_context == nullptr) {
+		//rendering_driver = "opengl3_es";
+		//OS::get_singleton()->set_current_rendering_driver_name(rendering_driver);
+
+		gl_context = SDL_GL_CreateContext(window);
+		if (!gl_context) {
+			print_line("DisplayServerSDL: Failed to create OpenGL ES context: " + String(SDL_GetError()));
+			ERR_FAIL_MSG("Failed to create OpenGL context: " + String(SDL_GetError()));
+		}
+
+		// if (!gladLoadGLES2((GLADloadfunc)SDL_GL_GetProcAddress)) {
+		// 	print_line("DisplayServerSDL: Failed to initialize OpenGL ES loader");
+		// 	ERR_FAIL_MSG("Failed to initialize OpenGL ES loader");
+		// }
+
+		if (!sbc_resolve_symbols_gles3(SDL_GL_GetProcAddress)) {
+			SDL_LogError(SDL_LOG_CATEGORY_VIDEO, "One or more GLES3 symbols failed to resolve, aborting.");
+		}
+
+		// Después de crear el contexto SDL2
+		// if (!gladLoadGLES2((GLADloadfunc)SDL_GL_GetProcAddress)) {
+		// 	printf("Error: %s\n", SDL_GetError());
+		// 	exit(-1);
+		// }
+
+		// Verifica funciones clave
+		if (!glBindBuffer || !glGenBuffers) {
+			printf("Funciones GLES críticas no cargadas\n");
+		}
+
+		//print_line("gladloader", gladLoaderLoadGLES2());
+
+		// print_line("DisplayServerSDL: OpenGL ES loader initialized");
+		// print_line("DisplayServerSDL: OpenGL ES version: " + String((const char *)glGetString(GL_VERSION)));
+		// print_line("DisplayServerSDL: OpenGL ES vendor: " + String((const char *)glGetString(GL_VENDOR)));
+		// print_line("DisplayServerSDL: OpenGL ES renderer: " + String((const char *)glGetString(GL_RENDERER)));
+		// print_line("DisplayServerSDL: OpenGL ES shading language version: " + String((const char *)glGetString(GL_SHADING_LANGUAGE_VERSION)));
+		// //print_line("DisplayServerSDL: OpenGL ES extensions: " + String((const char *)glGetString(GL_EXTENSIONS)));
+		// print_line("DisplayServerSDL: OpenGL ES framebuffer size: " + itos(p_resolution.width) + "x" + itos(p_resolution.height));
+
+		SDL_GL_MakeCurrent(window, gl_context);
+
+		SDL_GL_SetSwapInterval(1); // Enable VSync
+		//SDL_GL_SwapWindow(window);
+		print_line("DisplayServerSDL: OpenGL context created");
+
+		RasterizerGLES3::make_current(false);
+		print_line("OS_SBC: Rasterizer initialized");
+	}
+
+#endif
+
+	r_error = OK;
+}
+
+bool DisplayServerSDL::has_feature(Feature p_feature) const {
+	switch (p_feature) {
+		case FEATURE_MOUSE:
+		case FEATURE_ICON:
+		case FEATURE_SWAP_BUFFERS:
+			return true;
+		default:
+			return false;
+	}
+}
+
+void DisplayServerSDL::swap_buffers() {
+	SDL_GL_SwapWindow(window);
+}
+
+String DisplayServerSDL::get_name() const {
+	return "sbc";
+}
+
+int DisplayServerSDL::get_screen_count() const {
+	int num_displays = SDL_GetNumVideoDisplays();
+
+	if (num_displays < 0) {
+		fprintf(stderr, "Could not get display count from SDL, Error: %s\n", SDL_GetError());
+	}
+
+	return num_displays;
+}
+
+int DisplayServerSDL::get_primary_screen() const {
+	return 0;
+}
+
+Point2i DisplayServerSDL::screen_get_position(int p_screen) const {
+	int w, h;
+	SDL_GetWindowPosition(window, &w, &h);
+	return Point2i(w, h);
+}
+
+Size2i DisplayServerSDL::screen_get_size(int p_screen) const {
+	int w, h;
+
+	SDL_GetWindowSize(window, &w, &h);
+
+	return Size2i(w, h);
+}
+
+int DisplayServerSDL::screen_get_dpi(int p_screen) const {
+	if (p_screen == -1) {
+		p_screen = SDL_GetWindowDisplayIndex(window);
+	}
+
+	// Invalid screen?
+	ERR_FAIL_INDEX_V(p_screen, get_screen_count(), 0);
+
+	float diagonal_dpi = 96.0f;
+
+	if (SDL_GetDisplayDPI(p_screen, &diagonal_dpi, NULL, NULL) != 0) {
+		fprintf(stderr, "Could not get the screen DPI for display %i from SDL, Error: %s\n", p_screen, SDL_GetError());
+	}
+
+	return static_cast<int>(diagonal_dpi);
+}
+
+void DisplayServerSDL::initialize_gl_context() {
+	// if (gl_context == nullptr) {
+	// 	gl_context = SDL_GL_CreateContext(window);
+	// 	if (!gl_context) {
+	// 		print_line("DisplayServerSDL: Failed to create OpenGL context: " + String(SDL_GetError()));
+	// 		ERR_FAIL_MSG("Failed to create OpenGL context: " + String(SDL_GetError()));
+	// 	}
+	// 	//SDL_GL_SetSwapInterval(1); // Enable VSync
+	// 	SDL_GL_MakeCurrent(window, gl_context);
+	// 	SDL_GL_SwapWindow(window);
+	// 	print_line("DisplayServerSDL: OpenGL context created");
+	// }
+}
+
+void DisplayServerSDL::_destroy_window() {
+#ifdef GLES3_ENABLED
+	if (gl_context) {
+		SDL_GL_DeleteContext(gl_context);
+		gl_context = nullptr;
+	}
+
+#endif
+	if (window) {
+		SDL_DestroyWindow(window);
+		window = nullptr;
+	}
+
+	SDL_Quit();
+}
+
+void DisplayServerSDL::window_set_title(const String &p_title, WindowID p_window) {
+	if (window) {
+		SDL_SetWindowTitle(window, p_title.utf8().get_data());
+	}
+}
+
+void DisplayServerSDL::window_set_size(const Size2i p_size, WindowID p_window) {
+	window_size = p_size;
+	if (window) {
+		SDL_SetWindowSize(window, p_size.x, p_size.y);
+	}
+}
+
+Size2i DisplayServerSDL::window_get_size(WindowID p_window) const {
+	int w, h;
+	SDL_GetWindowSize(window, &w, &h);
+
+	return Size2i(w, h);
+}
+
+void DisplayServerSDL::window_set_mode(WindowMode p_mode, WindowID p_window) {
+	window_mode = p_mode;
+	if (!window) {
+		return;
+	}
+
+	switch (p_mode) {
+		case WINDOW_MODE_FULLSCREEN:
+			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+			break;
+		case WINDOW_MODE_WINDOWED:
+			SDL_SetWindowFullscreen(window, 0);
+			break;
+		default:
+			break;
+	}
+}
+
+DisplayServer::WindowMode DisplayServerSDL::window_get_mode(WindowID p_window) const {
+	return window_mode;
+}
+
+DisplayServerSDL::~DisplayServerSDL() {
+	_destroy_window();
+}
+
+void DisplayServerSDL::initialize_rendering() {
+#ifdef GLES3_ENABLED
+
+#endif
+}
+
+Vector<DisplayServer::WindowID> DisplayServerSDL::get_window_list() const {
+	Vector<WindowID> list;
+	list.push_back(MAIN_WINDOW_ID);
+	return list;
+}
+
+DisplayServer::WindowID DisplayServerSDL::get_window_at_screen_position(const Point2i &p_position) const {
+	return MAIN_WINDOW_ID;
+}
+
+void DisplayServerSDL::window_attach_instance_id(ObjectID p_instance, WindowID p_window) {
+	attached_instance_id = p_instance;
+}
+
+ObjectID DisplayServerSDL::window_get_attached_instance_id(WindowID p_window) const {
+	return attached_instance_id;
+}
+
+void DisplayServerSDL::window_set_rect_changed_callback(const Callable &p_callable, WindowID p_window) {
+	rect_changed_callback = p_callable;
+}
+
+// Callbacks de eventos
+void DisplayServerSDL::window_set_window_event_callback(const Callable &p_callable, WindowID p_window) {
+	window_event_callback = p_callable;
+}
+
+void DisplayServerSDL::window_set_input_event_callback(const Callable &p_callable, WindowID p_window) {
+	input_event_callback = p_callable;
+}
+
+void DisplayServerSDL::window_set_input_text_callback(const Callable &p_callable, WindowID p_window) {
+	input_text_callback = p_callable;
+}
+
+void DisplayServerSDL::window_set_drop_files_callback(const Callable &p_callable, WindowID p_window) {
+	drop_files_callback = p_callable;
+}
+
+// Funciones de creación
+DisplayServer *DisplayServerSDL::create_func(
+		const String &p_rendering_driver,
+		WindowMode p_mode,
+		VSyncMode p_vsync,
+		uint32_t p_flags,
+		const Point2i *p_position,
+		const Size2i &p_resolution,
+		int p_screen,
+		Context p_context,
+		int64_t p_parent_window,
+		Error &r_error) {
+	DisplayServer *ds = memnew(DisplayServerSDL(
+			p_rendering_driver,
+			p_mode,
+			p_vsync,
+			p_flags,
+			p_position,
+			p_resolution,
+			p_screen,
+			p_context,
+			p_parent_window,
+			r_error));
+
+	if (r_error != OK) {
+		print_line("DisplayServerSDL: Error creating display server: " + itos(r_error));
+		ERR_PRINT("Error creating display server: " + itos(r_error));
+		memdelete(ds);
+		return nullptr;
+	}
+	return ds;
+}
+
+Rect2i DisplayServerSDL::screen_get_usable_rect(int p_screen) const {
+	Rect2i usable_rect = Rect2i(Point2i(0, 0), window_size);
+	return usable_rect;
+}
+
+float DisplayServerSDL::screen_get_refresh_rate(int p_screen) const {
+	SDL_DisplayMode mode;
+	if (SDL_GetCurrentDisplayMode(0, &mode)) {
+		return 60.0f;
+	}
+	return (float)mode.refresh_rate;
+}
+
+int DisplayServerSDL::window_get_current_screen(WindowID p_window) const {
+	int current_display = SDL_GetWindowDisplayIndex(window);
+
+	if (current_display < 0) {
+		fprintf(stderr, "Could not get the current display from SDL, Error: %s\n", SDL_GetError());
+	}
+
+	return current_display;
+}
+
+void DisplayServerSDL::window_set_current_screen(int p_screen, WindowID p_window) {
+	int screen_count = DisplayServerSDL::get_screen_count();
+	if (p_screen >= screen_count) {
+		return;
+	}
+
+	if (window_mode == WINDOW_MODE_FULLSCREEN) {
+		Point2i position = DisplayServerSDL::window_get_position(p_screen);
+
+		SDL_SetWindowPosition(window, position.x, position.y);
+	} else {
+		if (p_screen != DisplayServerSDL::window_get_current_screen(p_window)) {
+			Point2i position = DisplayServerSDL::window_get_position(p_screen);
+			SDL_SetWindowPosition(window, position.x, position.y);
+		}
+	}
+}
+
+Point2i DisplayServerSDL::window_get_position(WindowID p_window) const {
+	if (window) {
+		int x, y;
+		SDL_GetWindowPosition(window, &x, &y);
+		return Point2i(x, y);
+	}
+	return Point2i(0, 0);
+}
+
+Point2i DisplayServerSDL::window_get_position_with_decorations(WindowID p_window) const {
+	if (window) {
+		int x, y;
+		SDL_GetWindowPosition(window, &x, &y);
+		return Point2i(x, y);
+	}
+	return Point2i(0, 0);
+}
+
+void DisplayServerSDL::window_set_position(const Point2i &p_position, WindowID p_window) {
+	if (window) {
+		SDL_SetWindowPosition(window, p_position.x, p_position.y);
+	}
+}
+
+void DisplayServerSDL::window_set_transient(WindowID p_window, WindowID p_parent) {
+}
+
+void DisplayServerSDL::window_set_max_size(const Size2i p_size, WindowID p_window) {
+	if (window) {
+		SDL_SetWindowMaximumSize(window, p_size.x, p_size.y);
+	}
+}
+Size2i DisplayServerSDL::window_get_max_size(WindowID p_window) const {
+	if (window) {
+		int width, height;
+		SDL_GetWindowMaximumSize(window, &width, &height);
+		return Size2i(width, height);
+	}
+	return Size2i(0, 0);
+}
+
+void DisplayServerSDL::window_set_min_size(const Size2i p_size, WindowID p_window) {
+	if (window) {
+		SDL_SetWindowMinimumSize(window, p_size.x, p_size.y);
+	}
+}
+
+Size2i DisplayServerSDL::window_get_min_size(WindowID p_window) const {
+	if (window) {
+		int width, height;
+		SDL_GetWindowMinimumSize(window, &width, &height);
+		return Size2i(width, height);
+	}
+	return Size2i(0, 0);
+}
+
+Size2i DisplayServerSDL::window_get_size_with_decorations(WindowID p_window) const {
+	if (window) {
+		int width, height;
+		SDL_GetWindowSize(window, &width, &height);
+		return Size2i(width, height);
+	}
+	return Size2i(0, 0);
+}
+
+bool DisplayServerSDL::window_is_maximize_allowed(WindowID p_window) const {
+	if (window) {
+		return SDL_GetWindowFlags(window) & SDL_WINDOW_RESIZABLE;
+	}
+	return false;
+}
+
+void DisplayServerSDL::window_set_flag(WindowFlags p_flag, bool p_enabled, WindowID p_window) {
+	if (window) {
+		switch (p_flag) {
+			case WINDOW_FLAG_RESIZE_DISABLED:
+				SDL_SetWindowResizable(window, p_enabled ? SDL_TRUE : SDL_FALSE);
+				break;
+			case WINDOW_FLAG_MAX:
+				SDL_SetWindowFullscreen(window, p_enabled ? SDL_WINDOW_FULLSCREEN : 0);
+				break;
+			case WINDOW_FLAG_BORDERLESS:
+				SDL_SetWindowBordered(window, p_enabled ? SDL_TRUE : SDL_FALSE);
+				break;
+			default:
+				break;
+		}
+	}
+}
+bool DisplayServerSDL::window_get_flag(WindowFlags p_flag, WindowID p_window) const {
+	if (window) {
+		switch (p_flag) {
+			case WINDOW_FLAG_RESIZE_DISABLED:
+				return SDL_GetWindowFlags(window) & SDL_WINDOW_RESIZABLE;
+			case WINDOW_FLAG_MAX:
+				return SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
+			case WINDOW_FLAG_BORDERLESS:
+				return !(SDL_GetWindowFlags(window) & SDL_WINDOW_BORDERLESS);
+			default:
+				break;
+		}
+	}
+	return false;
+}
+
+void DisplayServerSDL::window_request_attention(WindowID p_window) {
+	if (window) {
+		SDL_SetWindowInputFocus(window);
+	}
+}
+
+void DisplayServerSDL::window_move_to_foreground(WindowID p_window) {
+	if (window) {
+		SDL_RaiseWindow(window);
+	}
+}
+bool DisplayServerSDL::window_is_focused(WindowID p_window) const {
+	if (window) {
+		return SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS;
+	}
+	return false;
+}
+
+bool DisplayServerSDL::window_can_draw(WindowID p_window) const {
+	if (window) {
+		return true; // SDL_GetWindowFlags(window) & SDL_WINDOW_SHOWN;
+	}
+	return false;
+}
+
+bool DisplayServerSDL::can_any_window_draw() const {
+	if (window) {
+		return SDL_GetWindowFlags(window) & SDL_WINDOW_SHOWN;
+	}
+	return false;
+}
+
+void DisplayServerSDL::process_events() {
+	SDL_Event event;
+	while (SDL_PollEvent(&event)) {
+		switch (event.type) {
+			case SDL_QUIT:
+
+				// if (OS::get_singleton()) {
+				// 	OS::get_singleton()->cl;
+				// }
+				break;
+			case SDL_WINDOWEVENT:
+				//if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
+				//	if (OS::get_singleton()) {
+				//	OS::get_singleton()->quit(0);
+				//	}
+				//}
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+Vector<String> DisplayServerSDL::get_rendering_drivers_func() {
+	Vector<String> drivers;
+
+#ifdef GLES3_ENABLED
+	//drivers.push_back("opengl3");
+	drivers.push_back("opengl3_es");
+#endif
+#ifdef VULKAN_ENABLED
+	drivers.push_back("vulkan");
+#endif
+
+	return drivers;
+}
+
+void DisplayServerSDL::register_sbc_driver() {
+	register_create_function("SDL2", create_func, get_rendering_drivers_func);
+	print_line("DisplayServerSDL: Registering SBC driver");
+	print_line("DisplayServerSDL: Available rendering drivers:");
+	print_line(get_create_function_count());
+	for (int i = 0; i < get_create_function_count(); i++) {
+		print_line("Driver " + String::num(i) + ": " + get_create_function_name(i));
+	}
+	//OS::get_singleton()->set_current_rendering_method("gl_compatibility");
+	//OS::get_singleton()->set_current_rendering_driver_name("GLES3");
+}
+
+SDL_Window *DisplayServerSDL::get_window() {
+	return SDL_GL_GetCurrentWindow();
+}
+
+void DisplayServerSDL::window_set_vsync_mode(VSyncMode p_vsync_mode, WindowID p_window) {
+	if (window) {
+		switch (p_vsync_mode) {
+			case VSYNC_ENABLED:
+				SDL_GL_SetSwapInterval(1);
+				break;
+			case VSYNC_DISABLED:
+				SDL_GL_SetSwapInterval(0);
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+DisplayServer::VSyncMode DisplayServerSDL::window_get_vsync_mode(WindowID p_window) const {
+	if (window) {
+		return VSYNC_ENABLED;
+	}
+	return VSYNC_DISABLED;
+}
+
+void DisplayServerSDL::set_icon(const Ref<Image> &p_icon) {
+	SDL_Surface *icon = SDL_CreateRGBSurfaceWithFormat(0, 10, 10, 32, SDL_PIXELFORMAT_ABGR8888);
+	if (!icon) {
+		return;
+	}
+	//SDL_LockSurface(icon);
+	//memcpy(icon->pixels, data, width * height * 4);
+	//SDL_UnlockSurface(icon);
+	//SDL_SetWindowIcon(window, icon);
+	//SDL_FreeSurface(icon);
+}

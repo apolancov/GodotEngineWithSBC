@@ -172,7 +172,7 @@ if env["builtin_harfbuzz"]:
             env_harfbuzz.Prepend(CPPPATH=["#thirdparty/graphite/include"])
             env_harfbuzz.Append(CCFLAGS=["-DGRAPHITE2_STATIC"])
 
-    if env["platform"] in ["android", "linuxbsd", "web"]:
+    if env["platform"] in ["android", "linuxbsd", "web", "sbc"]:
         env_harfbuzz.Append(CCFLAGS=["-DHAVE_PTHREAD"])
 
     env_text_server_adv.Prepend(CPPPATH=["#thirdparty/harfbuzz/src"])
