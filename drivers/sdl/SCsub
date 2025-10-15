@@ -118,7 +118,7 @@ if env["builtin_sdl"]:
 
     # Platform specific sources.
 
-    if env["platform"] == "linuxbsd":
+    if env["platform"] == "linuxbsd" or env["platform"] == "sbc":
         # TODO: Check support for BSD systems.
         env_sdl.Append(CPPDEFINES=["SDL_PLATFORM_LINUX"])
         thirdparty_sources += [

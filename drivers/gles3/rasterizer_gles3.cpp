@@ -32,11 +32,11 @@
 #include "storage/utilities.h"
 
 #ifdef GLES3_ENABLED
-
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
 #include "core/io/image.h"
 #include "core/os/os.h"
+#include "platform/sbc/display_server_sdl.h"
 #include "storage/texture_storage.h"
 
 #define _EXT_DEBUG_OUTPUT_SYNCHRONOUS_ARB 0x8242
@@ -269,11 +269,17 @@ RasterizerGLES3::RasterizerGLES3() {
 			glad_loaded = true;
 		}
 	} else {
-		if (!glad_loaded && gladLoaderLoadGLES2()) {
+#ifdef PLATFORM_SBC
+		if (!glad_loaded && gladLoadGLES2((GLADloadfunc)&get_gl_proc_address)) {
 			glad_loaded = true;
 		}
+#else
+		if (!glad_loaded && gladLoaderLoadGLES2()) {
+			print_line("GLAD loaded GLES2");
+			glad_loaded = true;
+		}
+#endif
 	}
-
 	// FIXME this is an early return from a constructor.  Any other code using this instance will crash or the finalizer will crash, because none of
 	// the members of this instance are initialized, so this just makes debugging harder.  It should either crash here intentionally,
 	// or we need to actually test for this situation before constructing this.

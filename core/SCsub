@@ -143,7 +143,7 @@ if env["builtin_zstd"]:
         "decompress/zstd_decompress.c",
     ]
     if (
-        env["platform"] in ["android", "ios", "linuxbsd", "macos", "windows"]
+        env["platform"] in ["android", "ios", "linuxbsd", "macos", "windows", "sbc"]
         and env["arch"] == "x86_64"
         and not env.msvc
     ):
